@@ -1,10 +1,18 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKFLOW COMPLETO PARA EL REPO PÚBLICO guillen1998/updateapp
+# 
+# Descarga los canales de Punto Play, los descifra y los publica en la rama
+# "canales" de ESTE mismo repositorio (público). El resultado es accesible en:
+#
+#   https://raw.githubusercontent.com/guillen1998/updateapp/canales/canales.json
+#
+# Se ejecuta MANUALMENTE desde la pestaña Actions (workflow_dispatch).
+# ─────────────────────────────────────────────────────────────────────────────
+
 name: Punto Play — canales (público)
 
 on:
   workflow_dispatch:
-  # Opcional: si quieres que se ejecute automáticamente cada 30 min, descomenta esta línea:
-  # schedule:
-  #   - cron: '*/30 * * * *'
 
 concurrency:
   group: puntoplay-canales
@@ -17,54 +25,69 @@ jobs:
   canales:
     runs-on: ubuntu-latest
     steps:
+      # 1. Configurar Python
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # 2. Instalar librería para descifrar
       - name: Instalar dependencias
         run: pip install --quiet pycryptodome
 
+      # 3. Bajar y descifrar canales (script completo en Python)
       - name: Bajar y descifrar canales
         run: |
           python3 - <<'PY'
           import base64, json, urllib.request
           from Crypto.Cipher import AES
+
           KEY = b"e72of82ke0gu2o2k"
           UA  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/138.0 Safari/537.36"
           SRC = "https://puntoplaytv.one/puntoplaytv/superadmin/paneltv/tv3.json"
           ENC = ("url", "drm_license_uri", "license", "licencia")
 
-          def unpad(b): return b[:-b[-1]] if b and 1 <= b[-1] <= 16 else b
+          def unpad(b):
+              return b[:-b[-1]] if b and 1 <= b[-1] <= 16 else b
+
           def dec(s):
               if not isinstance(s, str) or not s or s.startswith(("http://", "https://", "//")):
                   return s
               try:
                   raw = base64.b64decode(s + "===")
-                  if not raw or len(raw) % 16: return s
+                  if not raw or len(raw) % 16:
+                      return s
                   p = unpad(AES.new(KEY, AES.MODE_ECB).decrypt(raw)).decode("utf-8", "strict")
-                  return p if p and sum(c.isprintable() for c in p) / len(p) > 0.9 else s
+                  if p and sum(c.isprintable() for c in p) / len(p) > 0.9:
+                      return p
+                  return s
               except Exception:
                   return s
+
           def walk(n):
               if isinstance(n, dict):
                   d = dict(n)
                   for f in ENC:
-                      if isinstance(d.get(f), str): d[f] = dec(d[f])
+                      if isinstance(d.get(f), str):
+                          d[f] = dec(d[f])
                   if isinstance(d.get("headers"), dict):
                       d["headers"] = {k: dec(v) for k, v in d["headers"].items()}
                   return {k: walk(v) for k, v in d.items()}
-              if isinstance(n, list): return [walk(x) for x in n]
+              if isinstance(n, list):
+                  return [walk(x) for x in n]
               return n
 
           req = urllib.request.Request(SRC, headers={"User-Agent": UA})
           data = json.loads(urllib.request.urlopen(req, timeout=40).read().decode("utf-8", "replace"))
           claro = walk(data)
+
           with open("canales.json", "w", encoding="utf-8") as f:
               json.dump(claro, f, ensure_ascii=False, indent=2)
-          print("canales descifrados:", json.dumps(claro).count('"url"'))
+
+          print("✅ canales descifrados:", json.dumps(claro).count('"url"'))
           PY
 
-      - name: Publicar en rama canales (mismo repo)
+      # 4. Publicar en la rama "canales" (force push para mantener solo la última versión)
+      - name: Publicar en rama canales
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
